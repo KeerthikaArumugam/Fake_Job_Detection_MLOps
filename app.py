@@ -1,5 +1,8 @@
 import streamlit as st
 import joblib
+import pandas as pd
+import os
+from datetime import datetime
 
 # =========================
 # LOAD MODEL
@@ -60,6 +63,9 @@ if st.button("Predict"):
         # Probability
         probability = model.predict_proba(text_vector)[0][1]
 
+        fake_probability = probability * 100
+        genuine_probability = (1 - probability) * 100
+
         st.markdown("## Prediction Result")
 
         if prediction == 1:
@@ -68,8 +74,10 @@ if st.button("Predict"):
 
             st.metric(
                 label="Fake Job Probability",
-                value=f"{probability*100:.2f}%"
+                value=f"{fake_probability:.2f}%"
             )
+
+            prediction_label = "Fake Job"
 
         else:
 
@@ -77,20 +85,47 @@ if st.button("Predict"):
 
             st.metric(
                 label="Genuine Job Confidence",
-                value=f"{(1-probability)*100:.2f}%"
+                value=f"{genuine_probability:.2f}%"
             )
+
+            prediction_label = "Genuine Job"
 
         st.markdown("---")
 
         st.subheader("Prediction Summary")
 
-        st.write(
-            f"""
-            - Prediction: {'Fake Job' if prediction == 1 else 'Genuine Job'}
-            - Fake Probability: {probability*100:.2f}%
-            - Genuine Probability: {(1-probability)*100:.2f}%
-            """
-        )
+        st.write(f"""
+- **Prediction:** {prediction_label}
+- **Fake Probability:** {fake_probability:.2f}%
+- **Genuine Probability:** {genuine_probability:.2f}%
+""")
+
+        # =====================================
+        # SAVE PREDICTION LOG
+        # =====================================
+
+        log_data = {
+            "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Prediction": prediction_label,
+            "Fake Probability (%)": round(fake_probability, 2),
+            "Genuine Probability (%)": round(genuine_probability, 2),
+            "Job Description": job_text
+        }
+
+        log_df = pd.DataFrame([log_data])
+
+        if os.path.exists("prediction_logs.csv"):
+            log_df.to_csv(
+                "prediction_logs.csv",
+                mode="a",
+                header=False,
+                index=False
+            )
+        else:
+            log_df.to_csv(
+                "prediction_logs.csv",
+                index=False
+            )
 
 # =========================
 # FOOTER

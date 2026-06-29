@@ -1,134 +1,191 @@
-import pandas as pd
+import os
 import joblib
+import pandas as pd
+import numpy as np
+import mlflow
+import mlflow.sklearn
 
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
     classification_report,
-    confusion_matrix
+    confusion_matrix,
 )
 
 from imblearn.over_sampling import SMOTE
 
-# =========================
-# LOAD DATA
-# =========================
+# ============================================================
+# PROJECT PATHS
+# ============================================================
 
-print("Loading dataset...")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-df = pd.read_csv(
-    "data/processed_jobs.csv",
-    low_memory=False
-)
+DATA_PATH = os.path.join(BASE_DIR, "data", "processed_jobs.csv")
+MODEL_PATH = os.path.join(BASE_DIR, "models", "model.pkl")
+VECTORIZER_PATH = os.path.join(BASE_DIR, "models", "vectorizer.pkl")
 
-# Remove missing values
-df = df.dropna(subset=["text", "fraudulent"])
+# ============================================================
+# MLFLOW CONFIGURATION
+# ============================================================
 
-# Convert text to string
-df["text"] = df["text"].astype(str)
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
+mlflow.set_experiment("Fake Job Detection")
 
-X = df["text"]
-y = df["fraudulent"]
+# ============================================================
+# START MLFLOW RUN
+# ============================================================
 
-print("Dataset shape:", df.shape)
+with mlflow.start_run():
 
-# =========================
-# TRAIN TEST SPLIT
-# =========================
+    print("Loading dataset...")
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.20,
-    random_state=42,
-    stratify=y
-)
+    df = pd.read_csv(DATA_PATH, low_memory=False)
 
-print("Training samples:", len(X_train))
-print("Testing samples:", len(X_test))
+    df = df.dropna(subset=["text", "fraudulent"])
 
-# =========================
-# TF-IDF VECTORIZATION
-# =========================
+    df["text"] = df["text"].astype(str)
 
-print("\nVectorizing text...")
+    X = df["text"]
+    y = df["fraudulent"]
 
-vectorizer = TfidfVectorizer(
+    print("Dataset shape:", df.shape)
+
+    # ========================================================
+    # SPLIT
+    # ========================================================
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.20,
+        random_state=42,
+        stratify=y
+    )
+
+    print("Training samples:", len(X_train))
+    print("Testing samples:", len(X_test))
+
+    # ========================================================
+    # TF-IDF
+    # ========================================================
+
+    print("\nVectorizing text...")
+
+    vectorizer = TfidfVectorizer(
     stop_words="english",
     max_features=2000,
-    ngram_range=(1, 1),
-    min_df=10
+    ngram_range=(1,1),
+    min_df=20,
+    max_df=0.90,
+    sublinear_tf=True,
+    dtype=np.float32
 )
 
-X_train_vec = vectorizer.fit_transform(X_train)
-X_test_vec = vectorizer.transform(X_test)
+    X_train_vec = vectorizer.fit_transform(X_train)
+    X_test_vec = vectorizer.transform(X_test)
 
-print("Vectorization completed!")
+    print("Vectorization completed!")
 
-# =========================
-# HANDLE CLASS IMBALANCE
-# =========================
+    # ========================================================
+    # SMOTE
+    # ========================================================
 
-print("\nApplying SMOTE...")
+    print("\nApplying SMOTE...")
 
-smote = SMOTE(random_state=42)
+    smote = SMOTE(random_state=42)
 
-X_train_resampled, y_train_resampled = smote.fit_resample(
-    X_train_vec,
-    y_train
-)
+    X_train_resampled, y_train_resampled = smote.fit_resample(
+        X_train_vec,
+        y_train
+    )
 
-print("SMOTE completed!")
-print("Resampled shape:", X_train_resampled.shape)
+    print("SMOTE completed!")
+    print("Resampled shape:", X_train_resampled.shape)
 
-# =========================
-# TRAIN MODEL
-# =========================
+    # ========================================================
+    # MODEL
+    # ========================================================
 
-print("\nTraining model...")
+    print("\nTraining model...")
 
-model = LogisticRegression(
-    max_iter=1000,
-    random_state=42
-)
+    model = LogisticRegression(
+        max_iter=1000,
+        random_state=42
+    )
 
-model.fit(X_train_resampled, y_train_resampled)
+    model.fit(X_train_resampled, y_train_resampled)
 
-print("Model training completed!")
+    print("Model training completed!")
 
-# =========================
-# PREDICTIONS
-# =========================
+    # ========================================================
+    # PREDICTION
+    # ========================================================
 
-y_pred = model.predict(X_test_vec)
+    y_pred = model.predict(X_test_vec)
 
-# =========================
-# EVALUATION
-# =========================
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
 
-accuracy = accuracy_score(y_test, y_pred)
+    print("\n==============================")
+    print("MODEL PERFORMANCE")
+    print("==============================")
 
-print("\n==============================")
-print("MODEL PERFORMANCE")
-print("==============================")
+    print(f"Accuracy : {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall   : {recall:.4f}")
+    print(f"F1 Score : {f1:.4f}")
 
-print(f"Accuracy: {accuracy:.4f}")
+    print("\nClassification Report\n")
+    print(classification_report(y_test, y_pred))
 
-print("\nClassification Report:\n")
-print(classification_report(y_test, y_pred))
+    print("\nConfusion Matrix\n")
+    print(confusion_matrix(y_test, y_pred))
 
-print("\nConfusion Matrix:\n")
-print(confusion_matrix(y_test, y_pred))
+    # ========================================================
+    # SAVE MODEL
+    # ========================================================
 
-# =========================
-# SAVE MODEL
-# =========================
+    joblib.dump(model, MODEL_PATH)
+    joblib.dump(vectorizer, VECTORIZER_PATH)
 
-joblib.dump(model, "models/model.pkl")
-joblib.dump(vectorizer, "models/vectorizer.pkl")
+    print("\nModel saved successfully!")
 
-print("\nModel saved successfully!")
-print("Saved: models/model.pkl")
-print("Saved: models/vectorizer.pkl")
+    # ========================================================
+    # LOG PARAMETERS
+    # ========================================================
+
+    mlflow.log_param("algorithm", "Logistic Regression")
+    mlflow.log_param("max_features", 5000)
+    mlflow.log_param("ngram_range", "(1,2)")
+    mlflow.log_param("min_df", 10)
+    mlflow.log_param("smote", True)
+    mlflow.log_param("random_state", 42)
+
+    # ========================================================
+    # LOG METRICS
+    # ========================================================
+
+    mlflow.log_metric("accuracy", accuracy)
+    mlflow.log_metric("precision", precision)
+    mlflow.log_metric("recall", recall)
+    mlflow.log_metric("f1_score", f1)
+
+    # ========================================================
+    # LOG MODEL
+    # ========================================================
+
+    mlflow.sklearn.log_model(
+        sk_model=model,
+        name="FakeJobDetectionModel"
+    )
+
+    print("\nModel logged to MLflow successfully!")
+
+print("\nTraining completed successfully!")
